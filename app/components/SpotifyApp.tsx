@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AuthButtons from "./AuthButtons";
 import { PlayerProvider, usePlayer, type Track } from "./PlayerContext";
 import { Icons } from "./SpotifyIcons";
@@ -20,7 +21,6 @@ function PlayerBar() {
   }
   return (
     <div className="h-[80px] md:h-[88px] bg-black border-t border-white/10 flex items-center px-2 md:px-4 gap-2 md:gap-4">
-      {/* left */}
       <div className="flex items-center gap-3 w-[30%] min-w-0">
         <img src={current.coverUrl} alt="" className="h-11 w-11 md:h-14 md:w-14 rounded object-cover bg-zinc-800" />
         <div className="min-w-0 hidden sm:block">
@@ -29,7 +29,6 @@ function PlayerBar() {
         </div>
         <button className="hidden md:block ml-2 text-zinc-400 hover:text-white"><Icons.Heart className="h-4 w-4" /></button>
       </div>
-      {/* center */}
       <div className="flex flex-col items-center flex-1 max-w-[480px] gap-1">
         <div className="flex items-center gap-3 md:gap-5">
           <button onClick={() => setShuffle(!shuffle)} className={`hidden md:block ${shuffle ? "text-green-500" : "text-zinc-400 hover:text-white"}`}><Icons.Shuffle className="h-4 w-4" /></button>
@@ -48,12 +47,10 @@ function PlayerBar() {
           <span className="text-[11px] text-zinc-400 w-10">{formatTime(duration)}</span>
         </div>
       </div>
-      {/* right */}
       <div className="hidden md:flex items-center gap-3 w-[30%] justify-end">
         <Icons.Volume className="h-4 w-4 text-zinc-400" />
         <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-24 accent-white h-1" />
       </div>
-      {/* mobile progress overlay */}
       <div className="md:hidden absolute left-0 right-0 bottom-[56px] h-1 bg-white/10">
         <div className="h-full bg-white" style={{ width: `${duration ? (progress / duration) * 100 : 0}%` }} />
       </div>
@@ -65,6 +62,7 @@ function SongGrid({ songs }: { songs: Track[] }) {
   const { play, current, isPlaying } = usePlayer();
   const [filter, setFilter] = useState("All");
   const cats = ["All", "Music", "Podcasts"];
+  const filtered = filter === "All" ? songs : songs.filter(s => (filter==="Music" && s.artist!=="Podcast") || filter==="Podcasts");
   return (
     <>
       <div className="flex gap-2 mb-5">
@@ -74,10 +72,10 @@ function SongGrid({ songs }: { songs: Track[] }) {
       </div>
       <h2 className="text-xl md:text-2xl font-bold mb-4">Made For You</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 md:gap-6">
-        {songs.map((s) => {
+        {filtered.map((s) => {
           const active = current?._id === s._id;
           return (
-            <div key={s._id} onClick={() => play(s, songs)} className={`group bg-zinc-900/70 hover:bg-zinc-800 p-3 rounded-lg cursor-pointer transition ${active ? "bg-zinc-800 ring-1 ring-white/10" : ""}`}>
+            <div key={s._id} onClick={() => play(s, filtered)} className={`group bg-zinc-900/70 hover:bg-zinc-800 p-3 rounded-lg cursor-pointer transition ${active ? "bg-zinc-800 ring-1 ring-white/10" : ""}`}>
               <div className="relative">
                 <img src={s.coverUrl} alt={s.title} className="aspect-square rounded-md object-cover bg-zinc-800 w-full" />
                 <button className={`absolute bottom-2 right-2 h-12 w-12 bg-green-500 rounded-full flex items-center justify-center shadow-xl translate-y-2 opacity-0 group-hover:opacity-100 group-hover:translate-y-0 transition ${active && isPlaying ? "opacity-100 translate-y-0" : ""}`}>
@@ -104,57 +102,114 @@ function SongGrid({ songs }: { songs: Track[] }) {
   );
 }
 
-function Sidebar({ onPlay }: { onPlay?: () => void }) {
+type Playlist = { _id:string; name:string; coverUrl:string; type:string; songs:any[] };
+
+function Sidebar({ playlists, onCreate }: { playlists: Playlist[]; onCreate: (name:string, type:"playlist"|"album")=>void }) {
+  const [showModal, setShowModal] = useState(false);
+  const [name, setName] = useState("");
+  const [ptype, setPtype] = useState<"playlist"|"album">("playlist");
+  const submit = () => {
+    if(!name.trim()) return;
+    onCreate(name.trim(), ptype);
+    setName("");
+    setShowModal(false);
+  };
   return (
     <div className="flex flex-col gap-2 h-full">
       <div className="bg-[#121212] rounded-lg p-2">
         <div className="flex items-center gap-2 px-3 py-2 text-white font-bold"><span className="text-xl">●</span> Spotify</div>
         <nav className="mt-2 flex flex-col">
-          <a className="flex items-center gap-4 px-3 py-2 bg-white/10 rounded font-semibold text-white"><Icons.Home className="h-6 w-6" /> Home</a>
-          <a className="flex items-center gap-4 px-3 py-2 text-zinc-400 hover:text-white"><Icons.Search className="h-6 w-6" /> Search</a>
-          <a className="flex items-center gap-4 px-3 py-2 text-zinc-400 hover:text-white"><Icons.Library className="h-6 w-6" /> Your Library</a>
+          <Link href="/" className="flex items-center gap-4 px-3 py-2 bg-white/10 rounded font-semibold text-white"><Icons.Home className="h-6 w-6" /> Home</Link>
+          <Link href="/search" className="flex items-center gap-4 px-3 py-2 text-zinc-400 hover:text-white"><Icons.Search className="h-6 w-6" /> Search</Link>
+          <Link href="/search" className="flex items-center gap-4 px-3 py-2 text-zinc-400 hover:text-white"><Icons.Library className="h-6 w-6" /> Your Library</Link>
         </nav>
       </div>
-      <div className="bg-[#121212] rounded-lg p-4 flex-1 flex flex-col">
+      <div className="bg-[#121212] rounded-lg p-4 flex-1 flex flex-col overflow-hidden">
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-semibold text-zinc-300">Your Library</span>
-          <button className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-zinc-400"><Icons.Plus className="h-4 w-4" /></button>
+          <button onClick={()=>setShowModal(true)} className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-zinc-400"><Icons.Plus className="h-4 w-4" /></button>
         </div>
+
+        {playlists.length>0 ? (
+          <div className="space-y-2 overflow-auto mb-4 max-h-[220px]">
+            {playlists.map(p=> (
+              <div key={p._id} className="flex items-center gap-3 p-2 rounded hover:bg-white/10 cursor-pointer">
+                <img src={p.coverUrl} alt="" className="w-12 h-12 rounded object-cover bg-zinc-800"/>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{p.name}</p>
+                  <p className="text-xs text-zinc-400 capitalize">{p.type} • {p.songs?.length||0} songs</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="bg-[#242424] rounded-lg p-4 mb-3">
           <p className="text-sm font-bold">Create your first playlist</p>
           <p className="text-xs text-white/70 mt-1">It&apos;s easy, we&apos;ll help you</p>
-          <button className="mt-3 bg-white text-black px-4 py-1.5 rounded-full text-sm font-bold">Create playlist</button>
+          <button onClick={()=>{setPtype("playlist"); setShowModal(true)}} className="mt-3 bg-white text-black px-4 py-1.5 rounded-full text-sm font-bold hover:scale-105 transition">Create playlist</button>
         </div>
         <div className="bg-[#242424] rounded-lg p-4">
-          <p className="text-sm font-bold">Let&apos;s find some podcasts</p>
-          <p className="text-xs text-white/70 mt-1">We&apos;ll keep you updated</p>
-          <button className="mt-3 bg-white text-black px-4 py-1.5 rounded-full text-sm font-bold">Browse podcasts</button>
+          <p className="text-sm font-bold">Create an album</p>
+          <p className="text-xs text-white/70 mt-1">Group your favorite tracks</p>
+          <button onClick={()=>{setPtype("album"); setShowModal(true)}} className="mt-3 bg-white text-black px-4 py-1.5 rounded-full text-sm font-bold hover:scale-105 transition">Create album</button>
         </div>
+
         <div className="mt-auto text-[11px] text-zinc-500 flex flex-wrap gap-3 pt-4">
           <span>Legal</span><span>Privacy</span><span>Cookies</span>
         </div>
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={()=>setShowModal(false)}>
+          <div className="bg-[#242424] rounded-xl p-6 w-full max-w-sm" onClick={e=>e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-1">Create {ptype}</h3>
+            <p className="text-xs text-zinc-400 mb-4">Add to your library • stored in MongoDB</p>
+            <div className="flex gap-2 mb-3">
+              <button onClick={()=>setPtype("playlist")} className={`flex-1 py-2 rounded-full text-sm font-semibold ${ptype==="playlist"?"bg-white text-black":"bg-zinc-800 text-white"}`}>Playlist</button>
+              <button onClick={()=>setPtype("album")} className={`flex-1 py-2 rounded-full text-sm font-semibold ${ptype==="album"?"bg-white text-black":"bg-zinc-800 text-white"}`}>Album</button>
+            </div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder={`${ptype} name`} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-white/20" autoFocus onKeyDown={e=> e.key==="Enter" && submit()} />
+            <div className="flex gap-3 mt-5">
+              <button onClick={()=>setShowModal(false)} className="flex-1 py-2 rounded-full bg-zinc-800 text-white font-semibold">Cancel</button>
+              <button onClick={submit} disabled={!name.trim()} className="flex-1 py-2 rounded-full bg-green-500 text-black font-bold disabled:opacity-50">Create</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) {
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+
+  const fetchPlaylists = async () => {
+    try { const r = await fetch("/api/playlists"); const j = await r.json(); if(j.ok) setPlaylists(j.playlists); } catch {}
+  };
+  useEffect(()=>{ fetchPlaylists(); }, []);
+
+  const handleCreate = async (name:string, type:"playlist"|"album") => {
+    const r = await fetch("/api/playlists",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ name, type }) });
+    const j = await r.json();
+    if(j.ok) fetchPlaylists();
+    else alert(j.error||"Failed");
+  };
+
   return (
     <PlayerProvider>
       <div className="h-screen bg-black text-white flex flex-col overflow-hidden">
-        {/* DESKTOP LAYOUT */}
         <div className="hidden md:flex flex-1 gap-2 p-2 overflow-hidden">
-          <aside className="w-[280px] xl:w-[350px] shrink-0 overflow-hidden"><Sidebar /></aside>
+          <aside className="w-[280px] xl:w-[350px] shrink-0 overflow-hidden"><Sidebar playlists={playlists} onCreate={handleCreate} /></aside>
           <main className="flex-1 bg-[#121212] rounded-lg flex flex-col overflow-hidden">
-            {/* header */}
             <header className="flex items-center justify-between px-6 py-3 bg-[#121212]/80 backdrop-blur sticky top-0 z-10">
               <div className="flex gap-2">
-                <button className="h-8 w-8 rounded-full bg-black/70 flex items-center justify-center">‹</button>
-                <button className="h-8 w-8 rounded-full bg-black/70 flex items-center justify-center opacity-50">›</button>
+                <Link href="/" className="h-8 w-8 rounded-full bg-black/70 flex items-center justify-center">‹</Link>
+                <Link href="/search" className="h-8 w-8 rounded-full bg-black/70 flex items-center justify-center opacity-60 hover:opacity-100">›</Link>
               </div>
               <div className="flex items-center gap-2">
-                <a href="#" className="hidden lg:block bg-white text-black px-4 py-1.5 rounded-full text-sm font-bold">Explore Premium</a>
+                <Link href="/search" className="hidden lg:flex items-center gap-2 bg-zinc-800 text-white px-4 py-1.5 rounded-full text-sm font-bold hover:bg-zinc-700"><Icons.Search className="h-4 w-4"/> Search</Link>
                 <AuthButtons />
               </div>
             </header>
@@ -163,7 +218,6 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
             </div>
           </main>
         </div>
-        {/* MOBILE LAYOUT */}
         <div className="md:hidden flex-1 bg-[#121212] overflow-y-auto">
           <header className="sticky top-0 z-10 bg-[#121212] flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2 font-bold"><span className="text-xl">●</span> Spotify</div>
@@ -173,22 +227,18 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
             <SongGrid songs={initialSongs} />
           </div>
           <nav className="fixed bottom-[80px] left-0 right-0 bg-gradient-to-t from-black to-transparent h-16 flex items-center justify-around px-4 border-t border-white/5 bg-black/95">
-            <button className="flex flex-col items-center text-white"><Icons.Home className="h-6 w-6" /><span className="text-[10px]">Home</span></button>
+            <Link href="/" className="flex flex-col items-center text-white"><Icons.Home className="h-6 w-6" /><span className="text-[10px]">Home</span></Link>
             <button className="flex flex-col items-center text-zinc-400" onClick={() => setIsMobileLibraryOpen(!isMobileLibraryOpen)}><Icons.Library className="h-6 w-6" /><span className="text-[10px]">Library</span></button>
-            <button className="flex flex-col items-center text-zinc-400"><Icons.Search className="h-6 w-6" /><span className="text-[10px]">Search</span></button>
+            <Link href="/search" className="flex flex-col items-center text-zinc-400"><Icons.Search className="h-6 w-6" /><span className="text-[10px]">Search</span></Link>
           </nav>
           {isMobileLibraryOpen && (
             <div className="fixed inset-0 bg-black/80 z-20 p-4" onClick={() => setIsMobileLibraryOpen(false)}>
-              <div className="bg-[#121212] rounded-lg p-4 mt-12" onClick={(e) => e.stopPropagation()}><Sidebar /></div>
+              <div className="bg-[#121212] rounded-lg p-4 mt-12 max-h-[70vh] overflow-auto" onClick={(e) => e.stopPropagation()}><Sidebar playlists={playlists} onCreate={handleCreate} /></div>
             </div>
           )}
         </div>
-        <div className="shrink-0"><PlayerBarWrapper /></div>
+        <div className="shrink-0"><PlayerBar /></div>
       </div>
     </PlayerProvider>
   );
-}
-
-function PlayerBarWrapper() {
-  return <PlayerBar />;
 }
