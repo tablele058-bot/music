@@ -1,6 +1,6 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Howl } from "howler";
+import { Howl, Howler } from "howler";
 
 export type Track = {
   _id: string;
@@ -48,16 +48,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [volume, setVolumeState] = useState(0.85);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
+
   const howlRef = useRef<Howl | null>(null);
+  const queueRef = useRef<Track[]>([]);
+  const idxRef = useRef<number>(-1);
   const rafRef = useRef<number | null>(null);
+
+  // keep refs in sync
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { idxRef.current = idx; }, [idx]);
 
   const current = idx >= 0 && queue[idx] ? queue[idx] : null;
 
   const cleanup = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
     if (howlRef.current) {
-      howlRef.current.off();
-      howlRef.current.unload();
+      try { howlRef.current.off(); } catch {}
+      try { howlRef.current.unload(); } catch {}
       howlRef.current = null;
     }
   }, []);
@@ -70,14 +78,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // unlock AudioContext on first user gesture (Chrome autoplay policy)
+  const unlock = useCallback(() => {
+    try {
+      const ctx = (Howler as any).ctx as AudioContext | undefined;
+      if (ctx && ctx.state === "suspended") ctx.resume();
+    } catch {}
+  }, []);
+
   const playAt = useCallback(
-    (i: number) => {
-      if (i < 0 || i >= queue.length) return;
+    (i: number, qOverride?: Track[]) => {
+      const q = qOverride ?? queueRef.current;
+      if (i < 0 || i >= q.length) return;
+      unlock();
       cleanup();
-      const track = queue[i];
+      const track = q[i];
+      // ensure queue/index are set BEFORE creating Howl so next/prev work
+      if (qOverride) setQueue(qOverride);
+      setIdx(i);
+      idxRef.current = i;
+      queueRef.current = q;
+
       const howl = new Howl({
         src: [track.audioUrl],
-        html5: true, // stream big files
+        html5: true,
+        preload: true,
         volume,
         onplay: () => {
           setDuration(howl.duration() || track.duration || 0);
@@ -87,65 +112,75 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         onpause: () => setIsPlaying(false),
         onstop: () => setIsPlaying(false),
         onend: () => {
+          const curIdx = idxRef.current;
+          const curQueue = queueRef.current;
           if (repeat) {
             howl.seek(0);
             howl.play();
           } else if (shuffle) {
-            const n = Math.floor(Math.random() * queue.length);
+            const n = Math.floor(Math.random() * curQueue.length);
             playAt(n);
           } else {
-            if (i + 1 < queue.length) playAt(i + 1);
+            if (curIdx + 1 < curQueue.length) playAt(curIdx + 1);
             else setIsPlaying(false);
           }
         },
-        onloaderror: (_, err) => {
-          console.error("howl load error", err);
+        onloaderror: (_id, err) => {
+          console.error("howl load error", err, track.audioUrl);
           setIsPlaying(false);
         },
-        onplayerror: (_, err) => {
+        onplayerror: (_id, err) => {
           console.error("play error", err);
+          // try unlock and retry once (Chrome requires user gesture)
+          unlock();
+          const h = howlRef.current;
+          if (h) {
+            // Howler will emit unlock event and retry
+            (h as any).once?.("unlock", () => h.play());
+          }
           setIsPlaying(false);
         },
       });
       howlRef.current = howl;
-      setIdx(i);
-      howl.play();
+      // MUST be called synchronously within the same click stack
+      const playResult = howl.play();
+      // Howl returns soundId or undefined if blocked; unlock will handle retry via onplayerror
+      if (playResult === undefined) {
+        // html5 fallback - still set playing optimistically
+        setIsPlaying(true);
+      }
     },
-    [queue, volume, repeat, shuffle, cleanup, tick]
+    [volume, repeat, shuffle, cleanup, tick, unlock]
   );
 
   const play = useCallback(
     (track: Track, q?: Track[]) => {
-      const nextQueue = q ?? queue;
-      // if queue not set, build from single + keep others
+      unlock();
+      const nextQueue = q ?? queueRef.current;
       if (q) {
-        setQueue(q);
         const i = q.findIndex((t) => t._id === track._id || t.audioUrl === track.audioUrl);
-        // defer to next tick so queue state updates
-        setTimeout(() => playAt(i >= 0 ? i : 0), 0);
+        playAt(i >= 0 ? i : 0, q);
       } else {
-        // if no queue yet, use single
         if (nextQueue.length === 0) {
-          setQueue([track]);
-          setTimeout(() => playAt(0), 0);
+          playAt(0, [track]);
         } else {
           const i = nextQueue.findIndex((t) => t._id === track._id);
           if (i >= 0) playAt(i);
           else {
             const nq = [...nextQueue, track];
-            setQueue(nq);
-            setTimeout(() => playAt(nq.length - 1), 0);
+            playAt(nq.length - 1, nq);
           }
         }
       }
     },
-    [queue, playAt]
+    [playAt, unlock]
   );
 
   const toggle = useCallback(() => {
+    unlock();
     const h = howlRef.current;
     if (!h) {
-      if (current) playAt(idx);
+      if (current) playAt(idxRef.current);
       return;
     }
     if (h.playing()) {
@@ -153,29 +188,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsPlaying(false);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     } else {
-      h.play();
+      // resume suspended context if needed
+      const ctx = (Howler as any).ctx as AudioContext | undefined;
+      if (ctx && ctx.state === "suspended") ctx.resume().then(() => h.play());
+      else h.play();
       setIsPlaying(true);
       tick();
     }
-  }, [current, idx, playAt, tick]);
+  }, [current, playAt, tick, unlock]);
 
   const next = useCallback(() => {
-    if (queue.length === 0) return;
-    if (shuffle) {
-      playAt(Math.floor(Math.random() * queue.length));
-    } else {
-      playAt((idx + 1) % queue.length);
-    }
-  }, [idx, queue.length, shuffle, playAt]);
+    const q = queueRef.current;
+    if (q.length === 0) return;
+    unlock();
+    if (shuffle) playAt(Math.floor(Math.random() * q.length));
+    else playAt((idxRef.current + 1) % q.length);
+  }, [shuffle, playAt, unlock]);
 
   const prev = useCallback(() => {
     if (!howlRef.current) return;
+    unlock();
     if ((howlRef.current.seek() as number) > 3) {
       howlRef.current.seek(0);
       return;
     }
-    playAt((idx - 1 + queue.length) % queue.length);
-  }, [idx, queue.length, playAt]);
+    playAt((idxRef.current - 1 + queueRef.current.length) % queueRef.current.length);
+  }, [playAt, unlock]);
 
   const seek = useCallback((p: number) => {
     if (howlRef.current) {
@@ -187,13 +225,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const setVolume = useCallback((v: number) => {
     setVolumeState(v);
     if (howlRef.current) howlRef.current.volume(v);
+    Howler.volume(v);
   }, []);
 
   useEffect(() => {
     return () => cleanup();
   }, [cleanup]);
 
-  // init queue if empty later
+  // global unlock on first click (helps Chrome)
+  useEffect(() => {
+    const handler = () => unlock();
+    window.addEventListener("click", handler, { once: true });
+    window.addEventListener("touchstart", handler, { once: true });
+    return () => {
+      window.removeEventListener("click", handler);
+      window.removeEventListener("touchstart", handler);
+    };
+  }, [unlock]);
+
   return (
     <PlayerCtx.Provider
       value={{
