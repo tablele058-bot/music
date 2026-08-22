@@ -6,6 +6,7 @@ import { PlayerProvider, usePlayer, type Track } from "./PlayerContext";
 import { Icons } from "./SpotifyIcons";
 import CreatePlaylistModal from "./CreatePlaylistModal";
 import SongDetail from "./SongDetail";
+import { useTheme } from "./ThemeProvider";
 
 function formatTime(s: number) {
   if (!s || isNaN(s)) return "0:00";
@@ -108,7 +109,7 @@ function SongGrid({ songs, onSelect }: { songs: Track[]; onSelect: (t: Track)=>v
 
 type Playlist = { _id:string; name:string; coverUrl:string; type:string; songs:any[] };
 
-function Sidebar({ playlists, onCreate, onSelectPlaylist }: { playlists: Playlist[]; onCreate: (name:string, type:"playlist"|"album", desc:string, cover:string)=>void; onSelectPlaylist: (p:Playlist)=>void }) {
+function Sidebar({ playlists, onCreate, onSelectPlaylist, onDelete }: { playlists: Playlist[]; onCreate: (name:string, type:"playlist"|"album", desc:string, cover:string)=>void; onSelectPlaylist: (p:Playlist)=>void; onDelete: (id:string)=>void }) {
   const [showModal, setShowModal] = useState(false);
   return (
     <div className="flex flex-col gap-2 h-full">
@@ -129,12 +130,13 @@ function Sidebar({ playlists, onCreate, onSelectPlaylist }: { playlists: Playlis
         {playlists.length>0 ? (
           <div className="space-y-1 overflow-auto mb-4 max-h-[260px] pr-1">
             {playlists.map(p=> (
-              <div key={p._id} onClick={()=> onSelectPlaylist(p)} className="flex items-center gap-3 p-2 rounded hover:bg-white/10 cursor-pointer">
+              <div key={p._id} onClick={()=> onSelectPlaylist(p)} className="group flex items-center gap-3 p-2 rounded hover:bg-white/10 cursor-pointer">
                 <img src={p.coverUrl} alt="" className="w-12 h-12 rounded object-cover bg-zinc-800"/>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{p.name}</p>
                   <p className="text-xs text-zinc-400 capitalize">{p.type} • {p.songs?.length||0} songs</p>
                 </div>
+                <button onClick={(e)=>{e.stopPropagation(); if(confirm(`Delete ${p.type} "${p.name}"?`)) onDelete(p._id);}} className="opacity-0 group-hover:opacity-100 h-7 w-7 rounded-full bg-white/10 hover:bg-red-600 flex items-center justify-center text-xs">🗑</button>
               </div>
             ))}
           </div>
@@ -161,18 +163,19 @@ function Sidebar({ playlists, onCreate, onSelectPlaylist }: { playlists: Playlis
   );
 }
 
-function PlaylistDetail({ playlist, onClose, allSongs, onAdd }: { playlist: Playlist & {songs: Track[]}; onClose:()=>void; allSongs: Track[]; onAdd:(songId:string)=>void }) {
+function PlaylistDetail({ playlist, onClose, allSongs, onAdd, onDelete }: { playlist: Playlist & {songs: Track[]}; onClose:()=>void; allSongs: Track[]; onAdd:(songId:string)=>void; onDelete:(id:string)=>void }) {
   const { play } = usePlayer();
   const [adding, setAdding] = useState(false);
   return (
     <div className="fixed inset-0 z-40 bg-black flex flex-col">
       <div className="h-64 bg-gradient-to-b from-green-900 via-zinc-900 to-black p-6 flex items-end gap-6">
         <img src={playlist.coverUrl} alt="" className="w-40 h-40 rounded shadow-2xl bg-zinc-800 object-cover"/>
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest">Playlist</p>
+        <div className="flex-1">
+          <p className="text-xs font-bold uppercase tracking-widest">{playlist.type}</p>
           <h1 className="text-4xl md:text-6xl font-black">{playlist.name}</h1>
           <p className="text-sm text-zinc-300 mt-2 capitalize">{playlist.type} • {playlist.songs?.length||0} songs</p>
         </div>
+        <button onClick={()=>{ if(confirm(`Delete ${playlist.type} "${playlist.name}"?`)){ onDelete(playlist._id); onClose(); } }} className="absolute top-4 right-12 h-8 w-8 rounded-full bg-red-600/80 hover:bg-red-600 flex items-center justify-center text-sm" title="Delete">🗑</button>
         <button onClick={onClose} className="absolute top-4 right-4 h-8 w-8 rounded-full bg-black/60 flex items-center justify-center">✕</button>
       </div>
       <div className="flex-1 overflow-auto p-6">
@@ -210,6 +213,15 @@ function PlaylistDetail({ playlist, onClose, allSongs, onAdd }: { playlist: Play
   );
 }
 
+function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  return (
+    <button onClick={toggle} className="h-8 w-8 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-sm" title={`Switch to ${theme==="dark"?"light":"dark"} mode`}>
+      {theme==="dark" ? "☀" : "☾"}
+    </button>
+  );
+}
+
 export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) {
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -228,13 +240,21 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
     else alert(j.error||"Failed");
   };
 
+  const handleDelete = async (id:string) => {
+    const r = await fetch(`/api/playlists/${id}`, { method:"DELETE" });
+    const j = await r.json();
+    if(j.ok){
+      setPlaylists(p=> p.filter(x=> x._id!==id));
+      if(selectedPlaylist && selectedPlaylist._id===id) setSelectedPlaylist(null);
+    } else alert(j.error||"Failed to delete");
+  };
+
   const handleAddToPlaylist = async (playlistId:string, songId:string) => {
     const r = await fetch(`/api/playlists/${playlistId}`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ action:"add", songId })});
     const j = await r.json();
     if(j.ok){
       fetchPlaylists();
       if(selectedPlaylist && selectedPlaylist._id===playlistId) setSelectedPlaylist(j.playlist);
-      // toast
     } else alert(j.error||"Failed to add");
   };
 
@@ -248,7 +268,7 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
     <PlayerProvider>
       <div className="h-screen bg-black text-white flex flex-col overflow-hidden">
         <div className="hidden md:flex flex-1 gap-2 p-2 overflow-hidden">
-          <aside className="w-[280px] xl:w-[350px] shrink-0 overflow-hidden"><Sidebar playlists={playlists} onCreate={handleCreate} onSelectPlaylist={openPlaylist} /></aside>
+          <aside className="w-[280px] xl:w-[350px] shrink-0 overflow-hidden"><Sidebar playlists={playlists} onCreate={handleCreate} onSelectPlaylist={openPlaylist} onDelete={handleDelete} /></aside>
           <main className="flex-1 bg-[#121212] rounded-lg flex flex-col overflow-hidden">
             <header className="flex items-center justify-between px-6 py-3 bg-[#121212]/80 backdrop-blur sticky top-0 z-10">
               <div className="flex gap-2">
@@ -256,7 +276,9 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
                 <Link href="/search" className="h-8 w-8 rounded-full bg-black/70 flex items-center justify-center opacity-60 hover:opacity-100">›</Link>
               </div>
               <div className="flex items-center gap-2">
+                <ThemeToggle />
                 <Link href="/search" className="hidden lg:flex items-center gap-2 bg-zinc-800 text-white px-4 py-1.5 rounded-full text-sm font-bold hover:bg-zinc-700"><Icons.Search className="h-4 w-4"/> Search</Link>
+                <Link href="/admin" className="hidden lg:flex bg-white text-black px-3 py-1.5 rounded-full text-xs font-bold">Admin</Link>
                 <AuthButtons />
               </div>
             </header>
@@ -268,7 +290,7 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
         <div className="md:hidden flex-1 bg-[#121212] overflow-y-auto">
           <header className="sticky top-0 z-10 bg-[#121212] flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2 font-bold"><span className="text-xl">●</span> Spotify</div>
-            <AuthButtons />
+            <div className="flex items-center gap-2"><ThemeToggle /><AuthButtons /></div>
           </header>
           <div className="px-4 pb-24">
             <SongGrid songs={initialSongs} onSelect={setSelectedSong} />
@@ -280,7 +302,7 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
           </nav>
           {isMobileLibraryOpen && (
             <div className="fixed inset-0 bg-black/80 z-20 p-4" onClick={() => setIsMobileLibraryOpen(false)}>
-              <div className="bg-[#121212] rounded-lg p-4 mt-12 max-h-[70vh] overflow-auto" onClick={(e) => e.stopPropagation()}><Sidebar playlists={playlists} onCreate={handleCreate} onSelectPlaylist={openPlaylist} /></div>
+              <div className="bg-[#121212] rounded-lg p-4 mt-12 max-h-[70vh] overflow-auto" onClick={(e) => e.stopPropagation()}><Sidebar playlists={playlists} onCreate={handleCreate} onSelectPlaylist={openPlaylist} onDelete={handleDelete} /></div>
             </div>
           )}
         </div>
@@ -290,7 +312,7 @@ export default function SpotifyApp({ initialSongs }: { initialSongs: Track[] }) 
           <SongDetail track={selectedSong} onClose={()=> setSelectedSong(null)} playlists={playlists} onAddToPlaylist={handleAddToPlaylist} allTracks={initialSongs} />
         )}
         {selectedPlaylist && (
-          <PlaylistDetail playlist={selectedPlaylist} onClose={()=> setSelectedPlaylist(null)} allSongs={initialSongs} onAdd={(sid)=> handleAddToPlaylist(selectedPlaylist._id, sid)} />
+          <PlaylistDetail playlist={selectedPlaylist} onClose={()=> setSelectedPlaylist(null)} allSongs={initialSongs} onAdd={(sid)=> handleAddToPlaylist(selectedPlaylist._id, sid)} onDelete={handleDelete} />
         )}
       </div>
     </PlayerProvider>
